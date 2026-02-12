@@ -53,6 +53,8 @@ class TabPFNEnsembleMember:
     X_train: np.ndarray | torch.Tensor
     y_train: np.ndarray | torch.Tensor
     sample_weight: np.ndarray | torch.Tensor | None
+    wicl_input_weight: np.ndarray | torch.Tensor | None
+    wicl_attention_weight: np.ndarray | torch.Tensor | None
     feature_schema: FeatureSchema
 
     def transform_X_test(
@@ -119,6 +121,8 @@ class TabPFNEnsemblePreprocessor:
         parallel_mode: Literal["block", "as-ready", "in-order"],
         override_random_state: int | np.random.Generator | None = None,
         sample_weight: np.ndarray | torch.Tensor | None = None,
+        wicl_input_weight: np.ndarray | torch.Tensor | None = None,
+        wicl_attention_weight: np.ndarray | torch.Tensor | None = None,
     ) -> Iterator[TabPFNEnsembleMember]:
         """Get an iterator over the fit and transform data."""
         preprocessed_data_iterator = fit_preprocessing(
@@ -126,6 +130,8 @@ class TabPFNEnsemblePreprocessor:
             X_train=X_train,
             y_train=y_train,
             sample_weight=sample_weight,
+            wicl_input_weight=wicl_input_weight,
+            wicl_attention_weight=wicl_attention_weight,
             feature_schema=feature_schema,
             random_state=override_random_state or self.rng,
             n_preprocessing_jobs=self.n_preprocessing_jobs,
@@ -146,6 +152,8 @@ class TabPFNEnsemblePreprocessor:
             X_train_preprocessed,
             y_train_preprocessed,
             sample_weight_preprocessed,
+            wicl_input_weight_preprocessed,
+            wicl_attention_weight_preprocessed,
             feature_schema_preprocessed,
         ) in enumerate(preprocessed_data_iterator):
             yield TabPFNEnsembleMember(
@@ -155,6 +163,8 @@ class TabPFNEnsemblePreprocessor:
                 X_train=X_train_preprocessed,
                 y_train=y_train_preprocessed,
                 sample_weight=sample_weight_preprocessed,
+                wicl_input_weight=wicl_input_weight_preprocessed,
+                wicl_attention_weight=wicl_attention_weight_preprocessed,
                 feature_schema=feature_schema_preprocessed,
             )
 
@@ -164,6 +174,8 @@ class TabPFNEnsemblePreprocessor:
         y_train: np.ndarray | torch.Tensor,
         feature_schema: FeatureSchema,
         sample_weight: np.ndarray | torch.Tensor | None = None,
+        wicl_input_weight: np.ndarray | torch.Tensor | None = None,
+        wicl_attention_weight: np.ndarray | torch.Tensor | None = None,
     ) -> list[TabPFNEnsembleMember]:
         """Fit and transform the ensemble members."""
         return list(
@@ -173,6 +185,8 @@ class TabPFNEnsemblePreprocessor:
                 feature_schema=feature_schema,
                 parallel_mode="block",
                 sample_weight=sample_weight,
+                wicl_input_weight=wicl_input_weight,
+                wicl_attention_weight=wicl_attention_weight,
             )
         )
 

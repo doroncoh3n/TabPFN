@@ -287,6 +287,8 @@ def create_inference_engine(  # noqa: PLR0913
     use_autocast_: bool,
     inference_mode: bool = True,
     sample_weight: np.ndarray | None = None,
+    wicl_input_weight: np.ndarray | None = None,
+    wicl_attention_weight: np.ndarray | None = None,
 ) -> InferenceEngine:
     """Create the appropriate TabPFN inference engine based on `fit_mode`.
 
@@ -310,12 +312,16 @@ def create_inference_engine(  # noqa: PLR0913
         inference_mode: Whether to use torch.inference_mode (set False if
             backprop is needed)
         sample_weight: Sample weights for training data.
+        wicl_input_weight: Sample weights for the input strategy.
+        wicl_attention_weight: Sample weights for the attention strategy.
     """
     if fit_mode == "low_memory":
         return InferenceEngineOnDemand(
             X_train=X_train,
             y_train=y_train,
             sample_weight=sample_weight,
+            wicl_input_weight=wicl_input_weight,
+            wicl_attention_weight=wicl_attention_weight,
             feature_schema=feature_schema,
             ensemble_preprocessor=ensemble_preprocessor,
             models=models,
@@ -329,6 +335,8 @@ def create_inference_engine(  # noqa: PLR0913
             X_train=X_train,
             y_train=y_train,
             sample_weight=sample_weight,
+            wicl_input_weight=wicl_input_weight,
+            wicl_attention_weight=wicl_attention_weight,
             feature_schema=feature_schema,
             ensemble_preprocessor=ensemble_preprocessor,
             models=models,
@@ -343,6 +351,8 @@ def create_inference_engine(  # noqa: PLR0913
             X_train=X_train,
             y_train=y_train,
             sample_weight=sample_weight,
+            wicl_input_weight=wicl_input_weight,
+            wicl_attention_weight=wicl_attention_weight,
             feature_schema=feature_schema,
             ensemble_preprocessor=ensemble_preprocessor,
             models=models,

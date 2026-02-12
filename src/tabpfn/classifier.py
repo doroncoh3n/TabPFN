@@ -721,7 +721,12 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
     @config_context(transform_output="default")  # type: ignore
     @track_model_call(model_method="fit", param_names=["X", "y"])
     def fit(
-        self, X: XType, y: YType, sample_weight: Sequence[float] | None = None
+        self,
+        X: XType,
+        y: YType,
+        sample_weight: Sequence[float] | None = None,
+        wicl_input_weight: Sequence[float] | None = None,
+        wicl_attention_weight: Sequence[float] | None = None,
     ) -> Self:
         """Fit the model.
 
@@ -729,6 +734,8 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             X: The input data.
             y: The target variable.
             sample_weight: The sample weights.
+            wicl_input_weight: The sample weights for the input strategy.
+            wicl_attention_weight: The sample weights for the attention strategy.
 
         Returns:
             self
@@ -753,6 +760,21 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         ensemble_configs, X, y, sample_weight = self._initialize_dataset_preprocessing(
             X, y, rng, sample_weight
         )
+        # Use specific weights if provided, otherwise default to sample_weight
+        if wicl_input_weight is not None:
+            _, _, _, wicl_input_weight = self._initialize_dataset_preprocessing(
+                X, y, rng, wicl_input_weight
+            )
+        else:
+            wicl_input_weight = sample_weight
+
+        if wicl_attention_weight is not None:
+            _, _, _, wicl_attention_weight = self._initialize_dataset_preprocessing(
+                X, y, rng, wicl_attention_weight
+            )
+        else:
+            wicl_attention_weight = sample_weight
+
         self.ensemble_configs_ = ensemble_configs
 
         self._maybe_calibrate_temperature_and_tune_decision_thresholds(X=X, y=y)
@@ -768,7 +790,9 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             fit_mode=self.fit_mode,
             X_train=X,
             y_train=y,
-            sample_weight=sample_weight,
+            sample_weight=sample_weight,  # Kept for backward compat/other uses? Actually primarily for WICL in current impl
+            wicl_input_weight=wicl_input_weight,
+            wicl_attention_weight=wicl_attention_weight,
             feature_schema=self.inferred_feature_schema_,
             models=self.models_,
             ensemble_preprocessor=self.ensemble_preprocessor_,

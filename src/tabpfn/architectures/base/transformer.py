@@ -288,6 +288,8 @@ class PerFeatureTransformer(Architecture):
         y: torch.Tensor | dict[str, torch.Tensor] | None,
         *,
         sample_weight: torch.Tensor | None = None,
+        wicl_input_weight: torch.Tensor | None = None,
+        wicl_attention_weight: torch.Tensor | None = None,
         only_return_standard_out: Literal[True] = True,
         categorical_inds: list[list[int]] | None = None,
         style: torch.Tensor | None = None,
@@ -303,6 +305,8 @@ class PerFeatureTransformer(Architecture):
         y: torch.Tensor | dict[str, torch.Tensor] | None,
         *,
         sample_weight: torch.Tensor | None = None,
+        wicl_input_weight: torch.Tensor | None = None,
+        wicl_attention_weight: torch.Tensor | None = None,
         only_return_standard_out: Literal[False],
         categorical_inds: list[list[int]] | None = None,
         style: torch.Tensor | None = None,
@@ -318,6 +322,8 @@ class PerFeatureTransformer(Architecture):
         y: torch.Tensor | dict[str, torch.Tensor] | None,
         *,
         sample_weight: torch.Tensor | None = None,
+        wicl_input_weight: torch.Tensor | None = None,
+        wicl_attention_weight: torch.Tensor | None = None,
         only_return_standard_out: bool = True,
         categorical_inds: list[list[int]] | None = None,
         style: torch.Tensor | None = None,
@@ -517,23 +523,30 @@ class PerFeatureTransformer(Architecture):
         # b s f e + b s 1 e -> b s f+1 e
         embedded_input = torch.cat((embedded_x, embedded_y.unsqueeze(2)), dim=2)
 
-        attn_bias = None
-        if sample_weight is not None:
-            # WICL strategies
-            log_weights = torch.log(sample_weight)
-            # 1. Input strategy: Add log(w) to embeddings of training samples
-            # sample_weight: (batch, n_train)
+        # WICL strategies
+
+        # 1. Input strategy
+        input_weights_to_use = wicl_input_weight if wicl_input_weight is not None else sample_weight
+        if input_weights_to_use is not None:
+            log_weights = torch.log(input_weights_to_use)
+            # input_weights_to_use: (batch, n_train)
             # embedded_input: (batch, seq_len, n_features, emsize)
-            # We assume sample_weight corresponds to the first n_train samples
-            n_train_weights = sample_weight.shape[1]
+            # We assume input_weights_to_use corresponds to the first n_train samples
+            n_train_weights = input_weights_to_use.shape[1]
             # Broadcast to (batch, n_train, 1, 1) to match embedded_input
             embedded_input[:, :n_train_weights] += log_weights.view(
-                sample_weight.shape[0], n_train_weights, 1, 1
+                input_weights_to_use.shape[0], n_train_weights, 1, 1
             )
 
-            # 2. Attention strategy: Create attn_bias
+        # 2. Attention strategy
+        attn_bias = None
+        attn_weights_to_use = wicl_attention_weight if wicl_attention_weight is not None else sample_weight
+        if attn_weights_to_use is not None:
+            log_weights = torch.log(attn_weights_to_use)
+            # attn_weights_to_use: (batch, n_train)
             # attn_bias: (batch, 1, 1, n_train)
-            attn_bias = log_weights.view(sample_weight.shape[0], 1, 1, n_train_weights)
+            n_train_weights = attn_weights_to_use.shape[1]
+            attn_bias = log_weights.view(attn_weights_to_use.shape[0], 1, 1, n_train_weights)
 
         if torch.isnan(embedded_input).any():
             raise TabPFNValidationError(

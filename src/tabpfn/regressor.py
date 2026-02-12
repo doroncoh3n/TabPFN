@@ -740,7 +740,12 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
     @config_context(transform_output="default")  # type: ignore
     @track_model_call(model_method="fit", param_names=["X", "y"])
     def fit(
-        self, X: XType, y: YType, sample_weight: Sequence[float] | None = None
+        self,
+        X: XType,
+        y: YType,
+        sample_weight: Sequence[float] | None = None,
+        wicl_input_weight: Sequence[float] | None = None,
+        wicl_attention_weight: Sequence[float] | None = None,
     ) -> Self:
         """Fit the model.
 
@@ -748,6 +753,8 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
             X: The input data.
             y: The target variable.
             sample_weight: The sample weights.
+            wicl_input_weight: The sample weights for the input strategy.
+            wicl_attention_weight: The sample weights for the attention strategy.
 
         Returns:
             self
@@ -774,6 +781,21 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
         ensemble_configs, X, y, sample_weight, znorm_space_bardist = (
             self._initialize_dataset_preprocessing(X, y, rng, sample_weight)
         )
+        # Use specific weights if provided, otherwise default to sample_weight
+        if wicl_input_weight is not None:
+            _, _, _, wicl_input_weight, _ = self._initialize_dataset_preprocessing(
+                X, y, rng, wicl_input_weight
+            )
+        else:
+            wicl_input_weight = sample_weight
+
+        if wicl_attention_weight is not None:
+            _, _, _, wicl_attention_weight, _ = self._initialize_dataset_preprocessing(
+                X, y, rng, wicl_attention_weight
+            )
+        else:
+            wicl_attention_weight = sample_weight
+
         self.znorm_space_bardist_ = znorm_space_bardist
         self.ensemble_configs_ = ensemble_configs
 
@@ -821,6 +843,8 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
             X_train=X,
             y_train=y,
             sample_weight=sample_weight,
+            wicl_input_weight=wicl_input_weight,
+            wicl_attention_weight=wicl_attention_weight,
             feature_schema=self.inferred_feature_schema_,
             ensemble_preprocessor=ensemble_preprocessor,
             models=self.models_,
