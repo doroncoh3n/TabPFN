@@ -286,6 +286,7 @@ def create_inference_engine(  # noqa: PLR0913
     memory_saving_mode: MemorySavingMode,
     use_autocast_: bool,
     inference_mode: bool = True,
+    sample_weight: np.ndarray | None = None,
 ) -> InferenceEngine:
     """Create the appropriate TabPFN inference engine based on `fit_mode`.
 
@@ -308,11 +309,13 @@ def create_inference_engine(  # noqa: PLR0913
         use_autocast_: Whether we use torch.autocast for inference.
         inference_mode: Whether to use torch.inference_mode (set False if
             backprop is needed)
+        sample_weight: Sample weights for training data.
     """
     if fit_mode == "low_memory":
         return InferenceEngineOnDemand(
             X_train=X_train,
             y_train=y_train,
+            sample_weight=sample_weight,
             feature_schema=feature_schema,
             ensemble_preprocessor=ensemble_preprocessor,
             models=models,
@@ -325,6 +328,7 @@ def create_inference_engine(  # noqa: PLR0913
         return InferenceEngineCachePreprocessing(
             X_train=X_train,
             y_train=y_train,
+            sample_weight=sample_weight,
             feature_schema=feature_schema,
             ensemble_preprocessor=ensemble_preprocessor,
             models=models,
@@ -338,6 +342,7 @@ def create_inference_engine(  # noqa: PLR0913
         return InferenceEngineCacheKV(
             X_train=X_train,
             y_train=y_train,
+            sample_weight=sample_weight,
             feature_schema=feature_schema,
             ensemble_preprocessor=ensemble_preprocessor,
             models=models,

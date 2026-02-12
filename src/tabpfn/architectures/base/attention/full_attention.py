@@ -282,6 +282,7 @@ class MultiHeadAttention(Attention):
         x: torch.Tensor,
         x_kv: torch.Tensor | None = None,
         *,
+        attn_bias: torch.Tensor | None = None,
         cache_kv: bool = False,
         add_input: bool = False,
         # Indicates that 'x' is not used after the call and its buffer can be reused
@@ -357,6 +358,7 @@ class MultiHeadAttention(Attention):
             self._k_cache,
             self._v_cache,
             self._kv_cache,
+            attn_bias=attn_bias,
             cache_kv=cache_kv,
             use_cached_kv=use_cached_kv,
             add_input=add_input,
@@ -374,6 +376,7 @@ class MultiHeadAttention(Attention):
         v_cache: torch.Tensor | None,
         kv_cache: torch.Tensor | None,
         *,
+        attn_bias: torch.Tensor | None = None,
         cache_kv: bool,
         use_cached_kv: bool,
         reuse_first_head_kv: bool,
@@ -509,6 +512,7 @@ class MultiHeadAttention(Attention):
             qkv,
             self.dropout_p,
             self.softmax_scale,
+            attn_bias=attn_bias,
         )
         return torch.einsum(
             "... h d, h d s -> ... s",
@@ -603,6 +607,7 @@ class MultiHeadAttention(Attention):
         qkv: torch.Tensor | None,
         dropout_p: float | None = None,
         softmax_scale: float | None = None,
+        attn_bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         assert (k is None) == (v is None)
         assert sum([qkv is None, kv is None, k is None and v is None]) == 2
@@ -629,6 +634,8 @@ class MultiHeadAttention(Attention):
                 extra_inputs["scale"] = (
                     softmax_scale  # defaults to 1/sqrt(d_k) if None or not provided
                 )
+            if attn_bias is not None:
+                extra_inputs["attn_mask"] = attn_bias
 
             # Check if we should use PyTorch 2.0's GQA support
             if USE_TORCH_2_GQA:
@@ -663,6 +670,16 @@ class MultiHeadAttention(Attention):
                 if softmax_scale is None
                 else softmax_scale
             )
+            if attn_bias is not None:
+                if attn_bias.ndim == 4:
+                    # Permute attn_bias if it's in (B, H, Q, K) format to match logits (B, Q, K, H)
+                    # No, logits is (b q k h).
+                    # attn_bias from SDPA is usually (B, H, Q, K).
+                    # If I pass (B, H, Q, K), I need to permute to (B, Q, K, H).
+                    logits += attn_bias.permute(0, 2, 3, 1)
+                else:
+                    logits += attn_bias
+
             ps = torch.softmax(logits, dim=2)
             ps = torch.dropout(ps, dropout_p, train=True)
             attention_head_outputs = torch.einsum("b q k h, b k h d -> b q h d", ps, v)

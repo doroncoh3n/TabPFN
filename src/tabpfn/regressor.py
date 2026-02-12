@@ -589,10 +589,12 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
         X: XType,
         y: YType,
         rng: np.random.Generator,
+        sample_weight: Sequence[float] | None = None,
     ) -> tuple[
         list[RegressorEnsembleConfig],
         np.ndarray,
         np.ndarray,
+        np.ndarray | None,
         FullSupportBarDistribution,
     ]:
         """Prepare ensemble configs and validate X, y for one dataset/chunk.
@@ -614,6 +616,14 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
         # Set class variables for sklearn compatibility
         self.feature_names_in_ = feature_names
         self.n_features_in_ = n_features
+
+        if sample_weight is not None:
+            sample_weight = np.asarray(sample_weight)
+            if len(sample_weight) != len(X):
+                raise ValueError(
+                    f"sample_weight length ({len(sample_weight)}) does not match "
+                    f"input data length ({len(X)})"
+                )
 
         feature_schema = detect_feature_modalities(
             X=X,
@@ -665,7 +675,7 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
 
         assert len(ensemble_configs) == self.n_estimators
 
-        return ensemble_configs, X, y, self.znorm_space_bardist_
+        return ensemble_configs, X, y, sample_weight, self.znorm_space_bardist_
 
     @track_model_call("fit", param_names=["X_preprocessed", "y_preprocessed"])
     def fit_from_preprocessed(
@@ -729,12 +739,15 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
 
     @config_context(transform_output="default")  # type: ignore
     @track_model_call(model_method="fit", param_names=["X", "y"])
-    def fit(self, X: XType, y: YType) -> Self:
+    def fit(
+        self, X: XType, y: YType, sample_weight: Sequence[float] | None = None
+    ) -> Self:
         """Fit the model.
 
         Args:
             X: The input data.
             y: The target variable.
+            sample_weight: The sample weights.
 
         Returns:
             self
@@ -750,11 +763,16 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
                 "Automatically switching to 'fit_preprocessors' mode for standard "
                 "prediction. The model will be re-initialized."
             )
-            self.fit_mode = "fit_preprocessors"
+            self.fit_mode: Literal[
+                "low_memory",
+                "fit_preprocessors",
+                "fit_with_cache",
+                "batched",
+            ] = "fit_preprocessors"
 
         byte_size, rng = self._initialize_model_variables()
-        ensemble_configs, X, y, znorm_space_bardist = (
-            self._initialize_dataset_preprocessing(X, y, rng)
+        ensemble_configs, X, y, sample_weight, znorm_space_bardist = (
+            self._initialize_dataset_preprocessing(X, y, rng, sample_weight)
         )
         self.znorm_space_bardist_ = znorm_space_bardist
         self.ensemble_configs_ = ensemble_configs
@@ -802,6 +820,7 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
             fit_mode=self.fit_mode,
             X_train=X,
             y_train=y,
+            sample_weight=sample_weight,
             feature_schema=self.inferred_feature_schema_,
             ensemble_preprocessor=ensemble_preprocessor,
             models=self.models_,
