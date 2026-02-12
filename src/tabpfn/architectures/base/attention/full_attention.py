@@ -487,6 +487,7 @@ class MultiHeadAttention(Attention):
         v_cache: torch.Tensor | None,
         kv_cache: torch.Tensor | None,
         *,
+        attn_bias: torch.Tensor | None = None,
         cache_kv: bool,
         use_cached_kv: bool,
         reuse_first_head_kv: bool,

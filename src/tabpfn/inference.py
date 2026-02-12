@@ -434,7 +434,9 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
             return model(
                 X_full,
                 y_train,
-                sample_weight=sample_weight,
+                sample_weight=sample_weight.transpose(0, 1)
+                if sample_weight is not None
+                else None,
                 only_return_standard_out=only_return_standard_out,
                 categorical_inds=batched_cat_ix,
                 save_peak_memory_factor=save_peak_memory_factor,
@@ -723,7 +725,9 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
             return model(
                 X_full,
                 y_train,
-                sample_weight=sample_weight,
+                sample_weight=sample_weight.transpose(0, 1)
+                if sample_weight is not None
+                else None,
                 only_return_standard_out=only_return_standard_out,
                 categorical_inds=batched_cat_ix,
                 save_peak_memory_factor=save_peak_memory_factor,
