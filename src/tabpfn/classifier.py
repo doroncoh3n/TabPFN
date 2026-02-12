@@ -112,6 +112,41 @@ if TYPE_CHECKING:
 DEFAULT_CLASSIFICATION_EVAL_METRIC = ClassifierEvalMetrics.ACCURACY
 
 
+def _extract_soft_labels_if_present(
+    y: YType,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Parse optional soft labels and return ``(hard_labels, soft_labels)``.
+
+    Soft labels are expected to be a 2D array of per-class probabilities with shape
+    ``(n_samples, n_classes)``.
+    """
+    y_array = np.asarray(y)
+    if y_array.ndim != 2:
+        return None, None
+
+    if y_array.shape[1] < 2:
+        raise ValueError(
+            "When passing soft labels to `fit`, `y` must contain probabilities for "
+            "at least 2 classes (shape `(n_samples, n_classes)`)."
+        )
+
+    if not np.issubdtype(y_array.dtype, np.number):
+        raise ValueError("Soft labels must be numeric.")
+
+    if not np.isfinite(y_array).all():
+        raise ValueError("Soft labels must be finite.")
+
+    if (y_array < 0).any() or (y_array > 1).any():
+        raise ValueError("Soft label probabilities must lie in the [0, 1] range.")
+
+    row_sums = y_array.sum(axis=1)
+    if not np.allclose(row_sums, 1.0, atol=1e-6):
+        raise ValueError("Each row of soft labels must sum to 1.")
+
+    hard_labels = np.argmax(y_array, axis=1).astype(int, copy=False)
+    return hard_labels, y_array
+
+
 class TabPFNClassifier(ClassifierMixin, BaseEstimator):
     """TabPFNClassifier class."""
 
@@ -622,9 +657,12 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
     ) -> tuple[list[ClassifierEnsembleConfig], np.ndarray, np.ndarray]:
         """Initialize the model for standard input."""
         # Data validation and cleaning
+        y_hard_labels, y_soft_labels = _extract_soft_labels_if_present(y)
+        y_for_validation = y_hard_labels if y_hard_labels is not None else y
+
         X, y, feature_names, n_features, original_y_name = ensure_compatible_fit_inputs(
             X,
-            y,
+            y_for_validation,
             estimator=self,
             max_num_samples=self.inference_config_.MAX_NUMBER_OF_SAMPLES,
             max_num_features=self.inference_config_.MAX_NUMBER_OF_FEATURES,
@@ -632,6 +670,8 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             ensure_y_numeric=False,
             devices=self.devices_,
         )
+        if y_soft_labels is not None:
+            y = y_soft_labels
 
         feature_schema = detect_feature_modalities(
             X=X,
@@ -650,13 +690,24 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         self.n_features_in_ = n_features
 
         # Label encoding
-        self.label_encoder_ = TabPFNLabelEncoder(original_target_name=original_y_name)
-        y, label_metadata = self.label_encoder_.fit_transform(
-            y=y, max_num_classes=self.inference_config_.MAX_NUMBER_OF_CLASSES
-        )
-        self.classes_ = label_metadata.classes
-        self.n_classes_ = label_metadata.n_classes
-        self.class_counts_ = label_metadata.class_counts
+        if y_soft_labels is not None:
+            self.classes_ = np.arange(y_soft_labels.shape[1])
+            self.n_classes_ = y_soft_labels.shape[1]
+            validate_num_classes(
+                num_classes=self.n_classes_,
+                max_num_classes=self.inference_config_.MAX_NUMBER_OF_CLASSES,
+            )
+            self.class_counts_ = y_soft_labels.sum(axis=0)
+        else:
+            self.label_encoder_ = TabPFNLabelEncoder(
+                original_target_name=original_y_name
+            )
+            y, label_metadata = self.label_encoder_.fit_transform(
+                y=y, max_num_classes=self.inference_config_.MAX_NUMBER_OF_CLASSES
+            )
+            self.classes_ = label_metadata.classes
+            self.n_classes_ = label_metadata.n_classes
+            self.class_counts_ = label_metadata.class_counts
 
         # Ensemble definition
         preprocessor_configs = self.inference_config_.PREPROCESS_TRANSFORMS
@@ -714,7 +765,9 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
 
         Args:
             X: The input data.
-            y: The target variable.
+            y: The target variable. Can either be hard labels of shape
+                ``(n_samples,)`` or soft labels of shape ``(n_samples, n_classes)``
+                containing per-class probabilities.
 
         Returns:
             self

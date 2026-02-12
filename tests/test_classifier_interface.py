@@ -1175,6 +1175,39 @@ def test__fit_with_roc_auc_metric_with_threshold_tuning__warns() -> None:
         clf.fit(X, y)
 
 
+def test__fit_accepts_soft_labels() -> None:
+    rng = np.random.default_rng(seed=7)
+    X = rng.normal(size=(24, 4))
+    y_hard = rng.integers(0, 3, size=24)
+    y_soft = np.eye(3, dtype=float)[y_hard] * 0.9 + (0.1 / 3.0)
+
+    clf = TabPFNClassifier(
+        n_estimators=1,
+        random_state=42,
+        model_path=_create_dummy_classifier_model_specs(max_num_classes=3),
+    )
+    clf.fit(X, y_soft)
+
+    assert clf.n_classes_ == 3
+    np.testing.assert_array_equal(clf.classes_, np.arange(3))
+    np.testing.assert_allclose(clf.class_counts_, y_soft.sum(axis=0))
+    assert clf.predict_proba(X).shape == (len(X), 3)
+
+
+def test__fit_with_invalid_soft_labels__raises() -> None:
+    rng = np.random.default_rng(seed=13)
+    X = rng.normal(size=(12, 3))
+    y_soft = np.full((12, 3), 0.5)
+
+    clf = TabPFNClassifier(
+        n_estimators=1,
+        random_state=42,
+        model_path=_create_dummy_classifier_model_specs(max_num_classes=3),
+    )
+
+    with pytest.raises(ValueError, match="sum to 1"):
+        clf.fit(X, y_soft)
+
 def _create_dummy_classifier_model_specs(
     max_num_classes: int = 10,
 ) -> ClassifierModelSpecs:

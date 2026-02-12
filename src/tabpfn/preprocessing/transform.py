@@ -66,7 +66,9 @@ def _fit_preprocessing_one(
     preprocessor = create_preprocessing_pipeline(config, random_state=static_seed)
     res = preprocessor.fit_transform(X_train, feature_schema)
 
-    y_train_processed = _transform_labels_one(config, y_train)
+    y_train_processed = _transform_labels_one(
+        config, y_train, random_state=static_seed
+    )
 
     return (
         config,
@@ -78,7 +80,10 @@ def _fit_preprocessing_one(
 
 
 def _transform_labels_one(
-    config: EnsembleConfig, y_train: np.ndarray | torch.Tensor
+    config: EnsembleConfig,
+    y_train: np.ndarray | torch.Tensor,
+    *,
+    random_state: int | np.random.Generator | None = None,
 ) -> np.ndarray:
     """Transform the labels for one ensemble config.
         for both regression or classification.
@@ -86,6 +91,7 @@ def _transform_labels_one(
     Args:
         config: Ensemble config.
         y_train: The unprocessed labels.
+        random_state: Random state used for stochastic soft-label sampling.
 
     Return: The processed labels.
     """
@@ -95,6 +101,17 @@ def _transform_labels_one(
                 y_train.reshape(-1, 1),
             ).ravel()
     elif isinstance(config, ClassifierEnsembleConfig):
+        if isinstance(y_train, torch.Tensor):
+            y_train = y_train.detach().cpu().numpy()
+
+        if y_train.ndim == 2:
+            rng = np.random.default_rng(random_state)
+            sampled_labels = np.array(
+                [rng.choice(y_train.shape[1], p=probas) for probas in y_train],
+                dtype=np.int64,
+            )
+            y_train = sampled_labels
+
         if config.class_permutation is not None:
             y_train = config.class_permutation[y_train]
     else:
