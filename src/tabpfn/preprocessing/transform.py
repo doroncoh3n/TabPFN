@@ -96,7 +96,11 @@ def _transform_labels_one(
             ).ravel()
     elif isinstance(config, ClassifierEnsembleConfig):
         if config.class_permutation is not None:
-            y_train = config.class_permutation[y_train]
+            if y_train.ndim == 2:
+                # Soft labels: permute columns
+                y_train = y_train[:, config.class_permutation]
+            else:
+                y_train = config.class_permutation[y_train]
     else:
         raise ValueError(f"Invalid ensemble config type: {type(config)}")
     return y_train

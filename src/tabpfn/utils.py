@@ -18,6 +18,7 @@ from sklearn.base import (
 
 from tabpfn.architectures.encoders import (
     MulticlassClassificationTargetEncoderStep,
+    SoftLabelReductionEncoderStep,
     TorchPreprocessingPipeline,
 )
 from tabpfn.constants import (
@@ -376,6 +377,36 @@ def remove_non_differentiable_preprocessing_from_models(
 
         model.y_encoder = TorchPreprocessingPipeline(
             steps=diffable_steps, output_key="output"
+        )
+
+
+def replace_multiclass_target_encoder_with_soft_label_reduction(
+    models: list[Architecture],
+) -> None:
+    """Replace MulticlassClassificationTargetEncoderStep with SoftLabelReductionEncoderStep.
+
+    This enables the model to accept soft labels (probabilities).
+
+    Args:
+        models: The models to update.
+    """
+    for model in models:
+        new_steps = []
+        for module in model.y_encoder:
+            if isinstance(module, MulticlassClassificationTargetEncoderStep):
+                new_steps.append(
+                    SoftLabelReductionEncoderStep(
+                        in_keys=module.in_keys,
+                        out_keys=module.out_keys,
+                        # We guess nan keys name, as it's standard
+                        nan_keys=("nan_indicators",),
+                    )
+                )
+            else:
+                new_steps.append(module)
+
+        model.y_encoder = TorchPreprocessingPipeline(
+            steps=new_steps, output_key="output"
         )
 
 

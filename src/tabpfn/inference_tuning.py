@@ -164,8 +164,12 @@ def get_tuning_splits(
         random_state=random_state,
     )
 
+    y_split = y
+    if y.ndim == 2 and y.shape[1] > 1:
+        y_split = np.argmax(y, axis=1)
+
     splits: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
-    for i, (train_indices, holdout_indices) in enumerate(splitter.split(X, y)):
+    for i, (train_indices, holdout_indices) in enumerate(splitter.split(X, y_split)):
         if i >= n_splits:
             break
         X_train_NtF = X[train_indices]
@@ -199,7 +203,13 @@ def find_optimal_classification_thresholds(
     # TODO: vectorize this loop loop and the one in
     # find_optimal_classification_threshold_single_class.
     for i in range(n_classes):
-        y_true_ovr = (y_true == i).astype(int)
+        if y_true.ndim == 2:
+            # For soft labels, we assume argmax for metric calculation unless
+            # a soft-label metric is supported (which isn't the case for
+            # threshold tuning typically).
+            y_true_ovr = (np.argmax(y_true, axis=1) == i).astype(int)
+        else:
+            y_true_ovr = (y_true == i).astype(int)
         y_pred_probas_ovr = y_pred_probas[:, i]
         best_thresh = find_optimal_classification_threshold_single_class(
             metric_name=metric_name,
@@ -318,7 +328,16 @@ def find_optimal_temperature(
     # TODO: think about vectorizing this loop.
     for temperature in temperatures:
         probas = logits_to_probabilities_fn(raw_logits, temperature)
-        current_log_loss = log_loss(y_true=y_true, y_pred=probas)
+
+        if y_true.ndim == 2 and y_true.shape[1] > 1:
+            # Custom log loss for soft labels (cross entropy)
+            # Clip predictions to avoid log(0)
+            eps = 1e-15
+            probas_clipped = np.clip(probas, eps, 1 - eps)
+            # Cross entropy: -sum(y_true * log(y_pred))
+            current_log_loss = -np.mean(np.sum(y_true * np.log(probas_clipped), axis=1))
+        else:
+            current_log_loss = log_loss(y_true=y_true, y_pred=probas)
 
         if current_log_loss < best_log_loss:
             best_log_loss = current_log_loss

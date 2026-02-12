@@ -882,7 +882,7 @@ def _prepare_model_inputs(
     X_train = torch.as_tensor(X_train, dtype=dtype, device=device)
     X_test = torch.as_tensor(X_test, dtype=dtype, device=device)
     X_full = torch.cat([X_train, X_test], dim=0).unsqueeze(1)
-    y_train = torch.as_tensor(y_train, dtype=dtype, device=device)
+    y_train = torch.as_tensor(y_train, dtype=dtype, device=device).unsqueeze(1)
     return X_full, y_train
 
 

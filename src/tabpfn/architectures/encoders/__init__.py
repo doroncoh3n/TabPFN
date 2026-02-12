@@ -16,6 +16,7 @@ from .steps import (
     NormalizeFeatureGroupsEncoderStep,
     RemoveDuplicateFeaturesEncoderStep,
     RemoveEmptyFeaturesEncoderStep,
+    SoftLabelReductionEncoderStep,
 )
 
 __all__ = (

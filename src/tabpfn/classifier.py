@@ -87,6 +87,7 @@ from tabpfn.utils import (
     convert_batch_of_cat_ix_to_schema,
     infer_random_state,
     remove_non_differentiable_preprocessing_from_models,
+    replace_multiclass_target_encoder_with_soft_label_reduction,
 )
 from tabpfn.validation import (
     ensure_compatible_fit_inputs,
@@ -738,6 +739,10 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         byte_size, rng = self._initialize_model_variables()
         ensemble_configs, X, y = self._initialize_dataset_preprocessing(X, y, rng)
         self.ensemble_configs_ = ensemble_configs
+
+        # Soft labels detection: y is 2D and float
+        if isinstance(y, np.ndarray) and y.ndim == 2 and y.shape[1] > 1:
+            replace_multiclass_target_encoder_with_soft_label_reduction(self.models_)
 
         self._maybe_calibrate_temperature_and_tune_decision_thresholds(X=X, y=y)
 
