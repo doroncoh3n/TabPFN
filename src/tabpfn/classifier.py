@@ -725,7 +725,7 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         X: XType,
         y: YType,
         sample_weight: Sequence[float] | None = None,
-        wicl_strategy: Literal["SKM", "SKW", "dual", "none"] = "SKM",
+        wicl_strategy: Literal["SKM", "SAW", "dual", "none"] = "SKM",
     ) -> Self:
         """Fit the model.
 
@@ -734,8 +734,8 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             y: The target variable.
             sample_weight: The sample weights.
             wicl_strategy: The weighted in-context learning strategy to use.
-                - "SKM": Only use input weights (default).
-                - "SKW": Only use attention weights.
+                - "SKM": Scaling Key Matrix. Only use input weights (default).
+                - "SAW": Scaling Attention Weights. Only use attention weights.
                 - "dual": Use both input and attention weights.
                 - "none": Do not use any weighted in-context learning.
 
@@ -770,7 +770,7 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         if sample_weight is not None:
             if wicl_strategy == "SKM":
                 wicl_input_weight = sample_weight
-            elif wicl_strategy == "SKW":
+            elif wicl_strategy == "SAW":
                 wicl_attention_weight = sample_weight
             elif wicl_strategy == "dual":
                 wicl_input_weight = sample_weight
