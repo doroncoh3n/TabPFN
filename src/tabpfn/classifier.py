@@ -725,8 +725,7 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         X: XType,
         y: YType,
         sample_weight: Sequence[float] | None = None,
-        wicl_input_weight: Sequence[float] | None = None,
-        wicl_attention_weight: Sequence[float] | None = None,
+        wicl_strategy: Literal["SKM", "SKW", "dual", "none"] = "SKM",
     ) -> Self:
         """Fit the model.
 
@@ -734,8 +733,11 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             X: The input data.
             y: The target variable.
             sample_weight: The sample weights.
-            wicl_input_weight: The sample weights for the input strategy.
-            wicl_attention_weight: The sample weights for the attention strategy.
+            wicl_strategy: The weighted in-context learning strategy to use.
+                - "SKM": Only use input weights (default).
+                - "SKW": Only use attention weights.
+                - "dual": Use both input and attention weights.
+                - "none": Do not use any weighted in-context learning.
 
         Returns:
             self
@@ -760,20 +762,23 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         ensemble_configs, X, y, sample_weight = self._initialize_dataset_preprocessing(
             X, y, rng, sample_weight
         )
-        # Use specific weights if provided, otherwise default to sample_weight
-        if wicl_input_weight is not None:
-            _, _, _, wicl_input_weight = self._initialize_dataset_preprocessing(
-                X, y, rng, wicl_input_weight
-            )
-        else:
-            wicl_input_weight = sample_weight
 
-        if wicl_attention_weight is not None:
-            _, _, _, wicl_attention_weight = self._initialize_dataset_preprocessing(
-                X, y, rng, wicl_attention_weight
-            )
-        else:
-            wicl_attention_weight = sample_weight
+        # Determine WICL weights based on strategy
+        wicl_input_weight = None
+        wicl_attention_weight = None
+
+        if sample_weight is not None:
+            if wicl_strategy == "SKM":
+                wicl_input_weight = sample_weight
+            elif wicl_strategy == "SKW":
+                wicl_attention_weight = sample_weight
+            elif wicl_strategy == "dual":
+                wicl_input_weight = sample_weight
+                wicl_attention_weight = sample_weight
+            elif wicl_strategy == "none":
+                pass
+            else:
+                raise ValueError(f"Unknown wicl_strategy: {wicl_strategy}")
 
         self.ensemble_configs_ = ensemble_configs
 
