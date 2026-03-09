@@ -295,6 +295,9 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
         X_train: np.ndarray,
         y_train: np.ndarray,
         *,
+        sample_weight: np.ndarray | None = None,
+        wicl_input_weight: np.ndarray | None = None,
+        wicl_attention_weight: np.ndarray | None = None,
         feature_schema: FeatureSchema,
         ensemble_preprocessor: TabPFNEnsemblePreprocessor,
         models: list[Architecture],
@@ -308,6 +311,7 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
         Args:
             X_train: The training data.
             y_train: The training target.
+            sample_weight: The training sample weights.
             feature_schema: The feature schema.
             ensemble_preprocessor: The ensemble preprocessor to use.
             models: The models to use.
@@ -330,6 +334,9 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
 
         self.X_train = X_train
         self.y_train = y_train
+        self.sample_weight = sample_weight
+        self.wicl_input_weight = wicl_input_weight
+        self.wicl_attention_weight = wicl_attention_weight
         self.feature_schema = feature_schema
         self.static_seed = static_seed
         self.ensemble_preprocessor = ensemble_preprocessor
@@ -362,6 +369,9 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
             self.ensemble_preprocessor.fit_transform_ensemble_members_iterator(
                 X_train=self.X_train,
                 y_train=self.y_train,
+                sample_weight=self.sample_weight,
+                wicl_input_weight=self.wicl_input_weight,
+                wicl_attention_weight=self.wicl_attention_weight,
                 feature_schema=self.feature_schema,
                 parallel_mode="in-order",
                 override_random_state=np.random.default_rng(self.static_seed),
@@ -374,6 +384,9 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
                 X_train=ensemble_member.X_train,
                 X_test=ensemble_member.transform_X_test(X),
                 y_train=ensemble_member.y_train,
+                sample_weight=ensemble_member.sample_weight,
+                wicl_input_weight=ensemble_member.wicl_input_weight,
+                wicl_attention_weight=ensemble_member.wicl_attention_weight,
                 feature_schema=ensemble_member.feature_schema,
                 only_return_standard_out=only_return_standard_out,
                 autocast=autocast,
@@ -395,6 +408,9 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
         X_train: torch.Tensor | np.ndarray,
         X_test: torch.Tensor | np.ndarray,
         y_train: torch.Tensor | np.ndarray,
+        sample_weight: torch.Tensor | np.ndarray | None,
+        wicl_input_weight: torch.Tensor | np.ndarray | None,
+        wicl_attention_weight: torch.Tensor | np.ndarray | None,
         feature_schema: FeatureSchema,
         autocast: bool,
         only_return_standard_out: bool,
@@ -409,8 +425,15 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
         """
         model = self.model_caches[model_index].get(device)
 
-        X_full, y_train = _prepare_model_inputs(
-            device, self.force_inference_dtype, X_train, X_test, y_train
+        X_full, y_train, sample_weight, wicl_input_weight, wicl_attention_weight = _prepare_model_inputs(
+            device,
+            self.force_inference_dtype,
+            X_train,
+            X_test,
+            y_train,
+            sample_weight,
+            wicl_input_weight,
+            wicl_attention_weight,
         )
         batched_cat_ix = [feature_schema.indices_for(FeatureModality.CATEGORICAL)]
 
@@ -424,10 +447,16 @@ class InferenceEngineOnDemand(MultiDeviceInferenceEngine):
             num_train_rows=X_train.shape[0],
         )
 
+        def transpose_if_not_none(t):
+            return t.transpose(0, 1) if t is not None else None
+
         with get_autocast_context(device, enabled=autocast), torch.inference_mode():
             return model(
                 X_full,
                 y_train,
+                sample_weight=transpose_if_not_none(sample_weight),
+                wicl_input_weight=transpose_if_not_none(wicl_input_weight),
+                wicl_attention_weight=transpose_if_not_none(wicl_attention_weight),
                 only_return_standard_out=only_return_standard_out,
                 categorical_inds=batched_cat_ix,
                 save_peak_memory_factor=save_peak_memory_factor,
@@ -444,6 +473,7 @@ class InferenceEngineBatchedNoPreprocessing(SingleDeviceInferenceEngine):
         X_trains: list[torch.Tensor],
         y_trains: list[torch.Tensor],
         *,
+        sample_weights: list[torch.Tensor] | None = None,
         feature_schema: list[list[FeatureSchema]],
         ensemble_configs: list[list[EnsembleConfig]],
         models: list[Architecture],
@@ -458,6 +488,7 @@ class InferenceEngineBatchedNoPreprocessing(SingleDeviceInferenceEngine):
         Args:
             X_trains: The training data.
             y_trains: The training target.
+            sample_weights: The training sample weights.
             feature_schema: The feature schema.
             models: The models to use.
             devices: A list of devices, the first of which will be used to run the
@@ -484,6 +515,7 @@ class InferenceEngineBatchedNoPreprocessing(SingleDeviceInferenceEngine):
 
         self.X_trains = X_trains
         self.y_trains = y_trains
+        self.sample_weights = sample_weights
         self.feature_schema_list = feature_schema
         self.ensemble_configs = ensemble_configs
         self.inference_mode = inference_mode
@@ -504,9 +536,15 @@ class InferenceEngineBatchedNoPreprocessing(SingleDeviceInferenceEngine):
             train_y_batch = self.y_trains[i]
             train_x_full = train_x_full.to(device)
             train_y_batch = train_y_batch.to(device)
+            sample_weight = self.sample_weights[i] if self.sample_weights else None
+            if sample_weight is not None:
+                sample_weight = sample_weight.to(device)
+
             if self.force_inference_dtype is not None:
                 train_x_full = train_x_full.type(self.force_inference_dtype)
                 train_y_batch = train_y_batch.type(self.force_inference_dtype)  # type: ignore
+                if sample_weight is not None:
+                    sample_weight = sample_weight.type(self.force_inference_dtype)
 
             with (
                 get_autocast_context(device, enabled=autocast),
@@ -515,6 +553,9 @@ class InferenceEngineBatchedNoPreprocessing(SingleDeviceInferenceEngine):
                 output = self.models[self.ensemble_configs[i][0]._model_index](
                     train_x_full.transpose(0, 1),
                     train_y_batch.transpose(0, 1),
+                    sample_weight=sample_weight.transpose(0, 1)
+                    if sample_weight is not None
+                    else None,
                     only_return_standard_out=True,
                     categorical_inds=list(  # noqa: C411
                         [
@@ -555,6 +596,9 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
         X_train: np.ndarray | torch.Tensor,
         y_train: np.ndarray | torch.Tensor,
         *,
+        sample_weight: np.ndarray | torch.Tensor | None = None,
+        wicl_input_weight: np.ndarray | torch.Tensor | None = None,
+        wicl_attention_weight: np.ndarray | torch.Tensor | None = None,
         feature_schema: FeatureSchema,
         ensemble_preprocessor: TabPFNEnsemblePreprocessor,
         models: list[Architecture],
@@ -570,6 +614,7 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
         Args:
             X_train: The training data.
             y_train: The training target.
+            sample_weight: The training sample weights.
             feature_schema: The feature schema.
             ensemble_preprocessor: The ensemble preprocessor to use.
             models: The models to use.
@@ -600,6 +645,9 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
             ensemble_preprocessor.fit_transform_ensemble_members(
                 X_train=X_train,
                 y_train=y_train,
+                sample_weight=sample_weight,
+                wicl_input_weight=wicl_input_weight,
+                wicl_attention_weight=wicl_attention_weight,
                 feature_schema=feature_schema,
             )
         )
@@ -642,6 +690,9 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
                 X_train=ensemble_member.X_train,
                 X_test=_transform_X_test(ensemble_member),
                 y_train=ensemble_member.y_train,
+                sample_weight=ensemble_member.sample_weight,
+                wicl_input_weight=ensemble_member.wicl_input_weight,
+                wicl_attention_weight=ensemble_member.wicl_attention_weight,
                 feature_schema=ensemble_member.feature_schema,
                 autocast=autocast,
                 only_return_standard_out=only_return_standard_out,
@@ -663,6 +714,9 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
         X_train: torch.Tensor | np.ndarray,
         X_test: torch.Tensor | np.ndarray,
         y_train: torch.Tensor | np.ndarray,
+        sample_weight: torch.Tensor | np.ndarray | None,
+        wicl_input_weight: torch.Tensor | np.ndarray | None,
+        wicl_attention_weight: torch.Tensor | np.ndarray | None,
         feature_schema: FeatureSchema,
         autocast: bool,
         only_return_standard_out: bool,
@@ -677,8 +731,15 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
         """
         model = self.model_caches[model_index].get(device)
 
-        X_full, y_train = _prepare_model_inputs(
-            device, self.force_inference_dtype, X_train, X_test, y_train
+        X_full, y_train, sample_weight, wicl_input_weight, wicl_attention_weight = _prepare_model_inputs(
+            device,
+            self.force_inference_dtype,
+            X_train,
+            X_test,
+            y_train,
+            sample_weight,
+            wicl_input_weight,
+            wicl_attention_weight,
         )
         batched_cat_ix = [feature_schema.indices_for(FeatureModality.CATEGORICAL)]
 
@@ -692,6 +753,9 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
             num_train_rows=X_train.shape[0],
         )
 
+        def transpose_if_not_none(t):
+            return t.transpose(0, 1) if t is not None else None
+
         with (
             get_autocast_context(device, enabled=autocast),
             torch.inference_mode(self.inference_mode),
@@ -699,6 +763,9 @@ class InferenceEngineCachePreprocessing(MultiDeviceInferenceEngine):
             return model(
                 X_full,
                 y_train,
+                sample_weight=transpose_if_not_none(sample_weight),
+                wicl_input_weight=transpose_if_not_none(wicl_input_weight),
+                wicl_attention_weight=transpose_if_not_none(wicl_attention_weight),
                 only_return_standard_out=only_return_standard_out,
                 categorical_inds=batched_cat_ix,
                 save_peak_memory_factor=save_peak_memory_factor,
@@ -722,6 +789,9 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
         X_train: np.ndarray,
         y_train: np.ndarray,
         *,
+        sample_weight: np.ndarray | None = None,
+        wicl_input_weight: np.ndarray | None = None,
+        wicl_attention_weight: np.ndarray | None = None,
         feature_schema: FeatureSchema,
         ensemble_preprocessor: TabPFNEnsemblePreprocessor,
         models: list[Architecture],
@@ -737,6 +807,7 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
         Args:
             X_train: The training data.
             y_train: The training target.
+            sample_weight: The training sample weights.
             feature_schema: The feature schema.
             ensemble_preprocessor: The ensemble configurations to use.
             models: The models to use.
@@ -755,6 +826,9 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
             ensemble_preprocessor.fit_transform_ensemble_members_iterator(
                 X_train=X_train,
                 y_train=y_train,
+                sample_weight=sample_weight,
+                wicl_input_weight=wicl_input_weight,
+                wicl_attention_weight=wicl_attention_weight,
                 feature_schema=feature_schema,
                 parallel_mode="as-ready",
             )
@@ -770,12 +844,27 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
             ens_model = ens_model.to(device)
             X = ensemble_member.X_train
             y = ensemble_member.y_train
+            sample_weight_mb = ensemble_member.sample_weight
+            wicl_input_weight_mb = ensemble_member.wicl_input_weight
+            wicl_attention_weight_mb = ensemble_member.wicl_attention_weight
 
             if not isinstance(X, torch.Tensor):
                 X = torch.as_tensor(X, dtype=torch.float32, device=device)
             X = X.unsqueeze(1)
             if not isinstance(y, torch.Tensor):
                 y = torch.as_tensor(y, dtype=torch.float32, device=device)
+            if sample_weight_mb is not None:
+                if not isinstance(sample_weight_mb, torch.Tensor):
+                    sample_weight_mb = torch.as_tensor(sample_weight_mb, dtype=torch.float32, device=device)
+                sample_weight_mb = sample_weight_mb.unsqueeze(1)
+            if wicl_input_weight_mb is not None:
+                if not isinstance(wicl_input_weight_mb, torch.Tensor):
+                    wicl_input_weight_mb = torch.as_tensor(wicl_input_weight_mb, dtype=torch.float32, device=device)
+                wicl_input_weight_mb = wicl_input_weight_mb.unsqueeze(1)
+            if wicl_attention_weight_mb is not None:
+                if not isinstance(wicl_attention_weight_mb, torch.Tensor):
+                    wicl_attention_weight_mb = torch.as_tensor(wicl_attention_weight_mb, dtype=torch.float32, device=device)
+                wicl_attention_weight_mb = wicl_attention_weight_mb.unsqueeze(1)
 
             batched_preprocessor_cat_ix = [
                 ensemble_member.feature_schema.indices_for(FeatureModality.CATEGORICAL)
@@ -796,6 +885,9 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
                 ens_model.forward(
                     X,
                     y,
+                    sample_weight=sample_weight_mb,
+                    wicl_input_weight=wicl_input_weight_mb,
+                    wicl_attention_weight=wicl_attention_weight_mb,
                     only_return_standard_out=only_return_standard_out,
                     categorical_inds=batched_preprocessor_cat_ix,
                 )
@@ -827,6 +919,23 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
             X_test = ensemble_member.transform_X_test(X)
             X_test = torch.as_tensor(X_test, dtype=torch.float32, device=self.device)
             X_test = X_test.unsqueeze(1)
+
+            sample_weight_mb = ensemble_member.sample_weight
+            wicl_input_weight_mb = ensemble_member.wicl_input_weight
+            wicl_attention_weight_mb = ensemble_member.wicl_attention_weight
+
+            def to_device_unsqueezed(t):
+                if t is None: return None
+                if not isinstance(t, torch.Tensor):
+                    t = torch.as_tensor(t, dtype=torch.float32, device=self.device)
+                else:
+                    t = t.to(self.device)
+                return t.unsqueeze(1)
+
+            sample_weight_mb = to_device_unsqueezed(sample_weight_mb)
+            wicl_input_weight_mb = to_device_unsqueezed(wicl_input_weight_mb)
+            wicl_attention_weight_mb = to_device_unsqueezed(wicl_attention_weight_mb)
+
             batched_cat_ix = [
                 ensemble_member.feature_schema.indices_for(FeatureModality.CATEGORICAL)
             ]
@@ -840,6 +949,9 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
             if self.force_inference_dtype is not None:
                 model.type(self.force_inference_dtype)
                 X_test = X_test.type(self.force_inference_dtype)
+                if sample_weight_mb is not None: sample_weight_mb = sample_weight_mb.type(self.force_inference_dtype)
+                if wicl_input_weight_mb is not None: wicl_input_weight_mb = wicl_input_weight_mb.type(self.force_inference_dtype)
+                if wicl_attention_weight_mb is not None: wicl_attention_weight_mb = wicl_attention_weight_mb.type(self.force_inference_dtype)
 
             with (
                 get_autocast_context(self.device, enabled=autocast),
@@ -848,6 +960,9 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
                 output = model(
                     X_test,
                     y=None,
+                    sample_weight=sample_weight_mb,
+                    wicl_input_weight=wicl_input_weight_mb,
+                    wicl_attention_weight=wicl_attention_weight_mb,
                     only_return_standard_out=only_return_standard_out,
                     categorical_inds=batched_cat_ix,
                     # When the KV cache is enabled, we assume we are under memory
@@ -877,13 +992,22 @@ def _prepare_model_inputs(
     X_train: torch.Tensor | np.ndarray,
     X_test: torch.Tensor | np.ndarray,
     y_train: torch.Tensor | np.ndarray,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    sample_weight: torch.Tensor | np.ndarray | None,
+    wicl_input_weight: torch.Tensor | np.ndarray | None,
+    wicl_attention_weight: torch.Tensor | np.ndarray | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
     dtype = force_inference_dtype if force_inference_dtype else torch.float32
     X_train = torch.as_tensor(X_train, dtype=dtype, device=device)
     X_test = torch.as_tensor(X_test, dtype=dtype, device=device)
     X_full = torch.cat([X_train, X_test], dim=0).unsqueeze(1)
     y_train = torch.as_tensor(y_train, dtype=dtype, device=device)
-    return X_full, y_train
+
+    def prepare_weight(w):
+        if w is not None:
+            return torch.as_tensor(w, dtype=dtype, device=device).unsqueeze(1)
+        return None
+
+    return X_full, y_train, prepare_weight(sample_weight), prepare_weight(wicl_input_weight), prepare_weight(wicl_attention_weight)
 
 
 def _move_and_squeeze_output(

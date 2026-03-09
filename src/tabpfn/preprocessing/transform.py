@@ -31,6 +31,9 @@ def _fit_preprocessing_one(
     config: EnsembleConfig,
     X_train: np.ndarray | torch.Tensor,
     y_train: np.ndarray | torch.Tensor,
+    sample_weight: np.ndarray | torch.Tensor | None,
+    wicl_input_weight: np.ndarray | torch.Tensor | None,
+    wicl_attention_weight: np.ndarray | torch.Tensor | None,
     random_state: int | np.random.Generator | None = None,
     *,
     feature_schema: FeatureSchema,
@@ -39,6 +42,9 @@ def _fit_preprocessing_one(
     PreprocessingPipeline,
     np.ndarray,
     np.ndarray,
+    np.ndarray | torch.Tensor | None,
+    np.ndarray | torch.Tensor | None,
+    np.ndarray | torch.Tensor | None,
     FeatureSchema,
 ]:
     """Fit preprocessing pipeline for a single ensemble configuration.
@@ -47,21 +53,37 @@ def _fit_preprocessing_one(
         config: Ensemble configuration.
         X_train: Training data.
         y_train: Training target.
+        sample_weight: Sample weights.
+        wicl_input_weight: Input weights.
+        wicl_attention_weight: Attention weights.
         random_state: Random seed.
         feature_schema: feature schema.
 
     Returns:
         Tuple containing the ensemble configuration, the fitted preprocessing pipeline,
-        the transformed training data, the transformed target, and the indices of
-        categorical features.
+        the transformed training data, the transformed target, the transformed
+        sample weights, input weights, attention weights, and the indices of categorical features.
     """
     static_seed, _ = infer_random_state(random_state)
     if config.subsample_ix is not None:
         X_train = X_train[config.subsample_ix]
         y_train = y_train[config.subsample_ix]
+        if sample_weight is not None:
+            sample_weight = sample_weight[config.subsample_ix]
+        if wicl_input_weight is not None:
+            wicl_input_weight = wicl_input_weight[config.subsample_ix]
+        if wicl_attention_weight is not None:
+            wicl_attention_weight = wicl_attention_weight[config.subsample_ix]
+
     if not isinstance(X_train, torch.Tensor):
         X_train = X_train.copy()
         y_train = y_train.copy()
+        if sample_weight is not None and not isinstance(sample_weight, torch.Tensor):
+            sample_weight = sample_weight.copy()
+        if wicl_input_weight is not None and not isinstance(wicl_input_weight, torch.Tensor):
+            wicl_input_weight = wicl_input_weight.copy()
+        if wicl_attention_weight is not None and not isinstance(wicl_attention_weight, torch.Tensor):
+            wicl_attention_weight = wicl_attention_weight.copy()
 
     preprocessor = create_preprocessing_pipeline(config, random_state=static_seed)
     res = preprocessor.fit_transform(X_train, feature_schema)
@@ -73,6 +95,9 @@ def _fit_preprocessing_one(
         preprocessor,
         res.X,
         y_train_processed,
+        sample_weight,
+        wicl_input_weight,
+        wicl_attention_weight,
         res.feature_schema,
     )
 
@@ -107,6 +132,9 @@ def fit_preprocessing(
     X_train: np.ndarray,
     y_train: np.ndarray,
     *,
+    sample_weight: np.ndarray | None = None,
+    wicl_input_weight: np.ndarray | None = None,
+    wicl_attention_weight: np.ndarray | None = None,
     random_state: int | np.random.Generator | None,
     feature_schema: FeatureSchema,
     n_preprocessing_jobs: int,
@@ -117,6 +145,9 @@ def fit_preprocessing(
         PreprocessingPipeline,
         np.ndarray,
         np.ndarray,
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
         FeatureSchema,
     ]
 ]:
@@ -126,6 +157,9 @@ def fit_preprocessing(
         configs: List of ensemble configurations.
         X_train: Training data.
         y_train: Training target.
+        sample_weight: Sample weights.
+        wicl_input_weight: Input weights.
+        wicl_attention_weight: Attention weights.
         random_state: Random number generator.
         feature_schema: feature schema.
         n_preprocessing_jobs: Number of worker processes to use.
@@ -149,7 +183,7 @@ def fit_preprocessing(
     Returns:
         Iterator of tuples containing the ensemble configuration, the fitted
         preprocessing pipeline, the transformed training data, the transformed target,
-        and the indices of categorical features.
+        the transformed sample weights, input weights, attention weights, and the indices of categorical features.
     """
     _, rng = infer_random_state(random_state)
 
@@ -168,7 +202,7 @@ def fit_preprocessing(
     seeds = rng.integers(0, np.iinfo(np.int32).max, len(configs))
     yield from executor(  # type: ignore[misc]
         [
-            worker_func(config, X_train, y_train, seed)
+            worker_func(config, X_train, y_train, sample_weight, wicl_input_weight, wicl_attention_weight, seed)
             for config, seed in zip(configs, seeds)
         ],
     )
