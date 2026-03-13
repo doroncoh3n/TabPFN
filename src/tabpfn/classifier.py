@@ -87,6 +87,7 @@ from tabpfn.utils import (
     convert_batch_of_cat_ix_to_schema,
     infer_random_state,
     remove_non_differentiable_preprocessing_from_models,
+    replace_multiclass_target_encoder_with_soft_label_reduction,
 )
 from tabpfn.validation import (
     ensure_compatible_fit_inputs,
@@ -619,7 +620,10 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         X: XType,
         y: YType,
         rng: np.random.Generator,
-    ) -> tuple[list[ClassifierEnsembleConfig], np.ndarray, np.ndarray]:
+        sample_weight: Sequence[float] | None = None,
+    ) -> tuple[
+        list[ClassifierEnsembleConfig], np.ndarray, np.ndarray, np.ndarray | None
+    ]:
         """Initialize the model for standard input."""
         # Data validation and cleaning
         X, y, feature_names, n_features, original_y_name = ensure_compatible_fit_inputs(
@@ -632,6 +636,14 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             ensure_y_numeric=False,
             devices=self.devices_,
         )
+
+        if sample_weight is not None:
+            sample_weight = np.asarray(sample_weight)
+            if len(sample_weight) != len(X):
+                raise ValueError(
+                    f"sample_weight length ({len(sample_weight)}) does not match "
+                    f"input data length ({len(X)})"
+                )
 
         feature_schema = detect_feature_modalities(
             X=X,
@@ -678,7 +690,7 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
         )
         assert len(ensemble_configs) == self.n_estimators
 
-        return ensemble_configs, X, y
+        return ensemble_configs, X, y, sample_weight
 
     def _get_tuning_classifier(self, **overwrite_kwargs: Any) -> TabPFNClassifier:
         """Return a fresh classifier configured for holdout tuning."""
@@ -709,12 +721,24 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
 
     @config_context(transform_output="default")  # type: ignore
     @track_model_call(model_method="fit", param_names=["X", "y"])
-    def fit(self, X: XType, y: YType) -> Self:
+    def fit(
+        self,
+        X: XType,
+        y: YType,
+        sample_weight: Sequence[float] | None = None,
+        wicl_strategy: Literal["SKM", "SAW", "dual", "none"] = "SKM",
+    ) -> Self:
         """Fit the model.
 
         Args:
             X: The input data.
             y: The target variable.
+            sample_weight: The sample weights.
+            wicl_strategy: The weighted in-context learning strategy to use.
+                - "SKM": Scaling Key Matrix. Only use input weights (default).
+                - "SAW": Scaling Attention Weights. Only use attention weights.
+                - "dual": Use both input and attention weights.
+                - "none": Do not use any weighted in-context learning.
 
         Returns:
             self
@@ -736,8 +760,32 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             ] = "fit_preprocessors"
 
         byte_size, rng = self._initialize_model_variables()
-        ensemble_configs, X, y = self._initialize_dataset_preprocessing(X, y, rng)
+        ensemble_configs, X, y, sample_weight = self._initialize_dataset_preprocessing(
+            X, y, rng, sample_weight
+        )
+
+        # Determine WICL weights based on strategy
+        wicl_input_weight = None
+        wicl_attention_weight = None
+
+        if sample_weight is not None:
+            if wicl_strategy == "SKM":
+                wicl_input_weight = sample_weight
+            elif wicl_strategy == "SAW":
+                wicl_attention_weight = sample_weight
+            elif wicl_strategy == "dual":
+                wicl_input_weight = sample_weight
+                wicl_attention_weight = sample_weight
+            elif wicl_strategy == "none":
+                pass
+            else:
+                raise ValueError(f"Unknown wicl_strategy: {wicl_strategy}")
+
         self.ensemble_configs_ = ensemble_configs
+
+        # Soft labels detection: y is 2D and float
+        if isinstance(y, np.ndarray) and y.ndim == 2 and y.shape[1] > 1:
+            replace_multiclass_target_encoder_with_soft_label_reduction(self.models_)
 
         self._maybe_calibrate_temperature_and_tune_decision_thresholds(X=X, y=y)
 
@@ -752,6 +800,9 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             fit_mode=self.fit_mode,
             X_train=X,
             y_train=y,
+            sample_weight=sample_weight,
+            wicl_input_weight=wicl_input_weight,
+            wicl_attention_weight=wicl_attention_weight,
             feature_schema=self.inferred_feature_schema_,
             models=self.models_,
             ensemble_preprocessor=self.ensemble_preprocessor_,

@@ -11,6 +11,7 @@ from .nan_handling_encoder_step import NanHandlingEncoderStep
 from .normalize_feature_groups_encoder_step import NormalizeFeatureGroupsEncoderStep
 from .remove_duplicate_features_encoder_step import RemoveDuplicateFeaturesEncoderStep
 from .remove_empty_features_encoder_step import RemoveEmptyFeaturesEncoderStep
+from .soft_label_reduction_encoder_step import SoftLabelReductionEncoderStep
 
 __all__ = [
     "FeatureTransformEncoderStep",
@@ -22,4 +23,5 @@ __all__ = [
     "NormalizeFeatureGroupsEncoderStep",
     "RemoveDuplicateFeaturesEncoderStep",
     "RemoveEmptyFeaturesEncoderStep",
+    "SoftLabelReductionEncoderStep",
 ]

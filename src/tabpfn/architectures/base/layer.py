@@ -251,6 +251,7 @@ class PerFeatureEncoderLayer(Module):
         save_peak_mem_factor: int | None,
         cache_trainset_representation: bool = False,
         att_src: Tensor | None = None,
+        attn_bias: Tensor | None = None,
     ) -> Tensor:
         """Pass the input through the encoder layer.
 
@@ -275,6 +276,8 @@ class PerFeatureEncoderLayer(Module):
                 (batch_size, num_train_items, num_feature_blocks, d_model).
                 This does not work with multiquery_item_attention_for_test_set and
                 cache_trainset_representation at this point.
+            attn_bias:
+                Bias to add to the attention scores.
 
         Returns:
             The transformer state passed through the encoder layer.
@@ -357,9 +360,20 @@ class PerFeatureEncoderLayer(Module):
             elif single_eval_pos:
                 attention_src_x = x[:, :single_eval_pos].transpose(1, 2)
 
+            attn_bias_expanded = attn_bias
+            if attn_bias_expanded is not None:
+                # Expand attn_bias to match flattened batch dimension (batch * num_feature_blocks)
+                # attn_bias: (batch, 1, 1, n_train)
+                # x: (batch, seq_len, num_feature_blocks, d_model)
+                num_feature_blocks = x.shape[2]
+                attn_bias_expanded = attn_bias_expanded.repeat_interleave(
+                    num_feature_blocks, dim=0
+                )
+
             return self.self_attn_between_items(
                 x.transpose(1, 2),
                 attention_src_x,
+                attn_bias=attn_bias_expanded,
                 save_peak_mem_factor=save_peak_mem_factor,
                 cache_kv=cache_trainset_representation and single_eval_pos,
                 add_input=True,
