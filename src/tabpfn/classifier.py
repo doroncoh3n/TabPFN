@@ -800,7 +800,7 @@ class TabPFNClassifier(ClassifierMixin, BaseEstimator):
             fit_mode=self.fit_mode,
             X_train=X,
             y_train=y,
-            sample_weight=sample_weight,  # Kept for backward compat/other uses? Actually primarily for WICL in current impl
+            sample_weight=sample_weight,
             wicl_input_weight=wicl_input_weight,
             wicl_attention_weight=wicl_attention_weight,
             feature_schema=self.inferred_feature_schema_,

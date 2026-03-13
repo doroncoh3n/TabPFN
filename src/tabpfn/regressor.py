@@ -772,12 +772,7 @@ class TabPFNRegressor(RegressorMixin, BaseEstimator):
                 "Automatically switching to 'fit_preprocessors' mode for standard "
                 "prediction. The model will be re-initialized."
             )
-            self.fit_mode: Literal[
-                "low_memory",
-                "fit_preprocessors",
-                "fit_with_cache",
-                "batched",
-            ] = "fit_preprocessors"
+            self.fit_mode = "fit_preprocessors"
 
         byte_size, rng = self._initialize_model_variables()
         ensemble_configs, X, y, sample_weight, znorm_space_bardist = (

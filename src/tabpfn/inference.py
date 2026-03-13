@@ -925,7 +925,8 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
             wicl_attention_weight_mb = ensemble_member.wicl_attention_weight
 
             def to_device_unsqueezed(t):
-                if t is None: return None
+                if t is None:
+                    return None
                 if not isinstance(t, torch.Tensor):
                     t = torch.as_tensor(t, dtype=torch.float32, device=self.device)
                 else:
@@ -949,9 +950,12 @@ class InferenceEngineCacheKV(SingleDeviceInferenceEngine):
             if self.force_inference_dtype is not None:
                 model.type(self.force_inference_dtype)
                 X_test = X_test.type(self.force_inference_dtype)
-                if sample_weight_mb is not None: sample_weight_mb = sample_weight_mb.type(self.force_inference_dtype)
-                if wicl_input_weight_mb is not None: wicl_input_weight_mb = wicl_input_weight_mb.type(self.force_inference_dtype)
-                if wicl_attention_weight_mb is not None: wicl_attention_weight_mb = wicl_attention_weight_mb.type(self.force_inference_dtype)
+                if sample_weight_mb is not None:
+                    sample_weight_mb = sample_weight_mb.type(self.force_inference_dtype)
+                if wicl_input_weight_mb is not None:
+                    wicl_input_weight_mb = wicl_input_weight_mb.type(self.force_inference_dtype)
+                if wicl_attention_weight_mb is not None:
+                    wicl_attention_weight_mb = wicl_attention_weight_mb.type(self.force_inference_dtype)
 
             with (
                 get_autocast_context(self.device, enabled=autocast),
