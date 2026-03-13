@@ -46,6 +46,24 @@ class TabPFNLabelEncoder:
         Returns:
             LabelEncodingResult containing transformed labels and class metadata.
         """
+        if y.ndim == 2 and y.shape[1] > 1:
+            n_classes = y.shape[1]
+            classes = np.arange(n_classes)
+            # Counts are floats for soft labels
+            counts = y.sum(axis=0)
+
+            validate_num_classes(
+                num_classes=n_classes,
+                max_num_classes=max_num_classes,
+            )
+            self._encoder.classes_ = classes
+
+            return y, LabelMetadata(
+                classes=classes,
+                n_classes=n_classes,
+                class_counts=counts,
+            )
+
         y_encoded = self._encoder.fit_transform(y)
         classes = typing.cast("np.ndarray", self._encoder.classes_)
         n_classes = len(classes)

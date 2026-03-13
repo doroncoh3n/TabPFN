@@ -11,10 +11,12 @@ import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 import torch
 from sklearn.base import is_classifier
 from sklearn.utils.multiclass import check_classification_targets
+from sklearn.utils.validation import check_consistent_length
 
 from tabpfn.errors import TabPFNValidationError
 from tabpfn.misc._sklearn_compat import check_array, validate_data
@@ -163,35 +165,89 @@ def ensure_compatible_fit_inputs_sklearn(
         and number of features.
     """
     try:
-        X, y = validate_data(
-            estimator,
-            X=X,
-            y=y,
-            # Parameters to `check_X_y()`
-            accept_sparse=False,
-            dtype=None,  # This is handled later in `fit()`
-            ensure_all_finite="allow-nan",
-            ensure_min_samples=2,
-            ensure_min_features=1,
-            y_numeric=ensure_y_numeric,
-            estimator=estimator,
-        )
-
+        # Check if y is likely soft labels (2D numeric array) for classifier
+        is_soft_labels = False
         if is_classifier(estimator):
-            check_classification_targets(y)
-            # Annoyingly, the `ensure_all_finite` above only applies to `X` and
-            # there is no way to specify this for `y`. The validation check above
-            # will also only check for NaNs in `y` if `multi_output=True` which is
-            # something we don't want. Hence, we run another check on `y` here.
-            # However, we also have to consider that if the dtype is a string type,
-            # then we still want to run finite checks without forcing a numeric dtype.
+            y_check = y
+            # Convert pandas/polars/pyarrow to numpy for shape check if needed
+            if hasattr(y, "to_numpy"):
+                try:
+                    y_check = y.to_numpy()
+                except Exception:
+                    pass
+            elif not isinstance(y, (np.ndarray, torch.Tensor)):
+                try:
+                    y_check = np.asarray(y)
+                except Exception:
+                    pass
+
+            # Check if it looks like a soft label array
+            if (
+                hasattr(y_check, "shape")
+                and len(y_check.shape) == 2
+                and y_check.shape[1] > 1
+            ):
+                # Check if numeric
+                if torch.is_tensor(y_check):
+                    is_soft_labels = True
+                elif hasattr(y_check, "dtype") and np.issubdtype(
+                    y_check.dtype, np.number
+                ):
+                    is_soft_labels = True
+
+        if is_soft_labels:
+            X = validate_data(
+                estimator,
+                X=X,
+                y="no_validation",
+                # Parameters to `check_X_y()`
+                accept_sparse=False,
+                dtype=None,  # This is handled later in `fit()`
+                ensure_all_finite="allow-nan",
+                ensure_min_samples=2,
+                ensure_min_features=1,
+                estimator=estimator,
+            )
+            # Validate y manually
             y = check_array(
                 y,
                 accept_sparse=False,
+                ensure_2d=True,
                 ensure_all_finite=True,
                 dtype=None,  # type: ignore
-                ensure_2d=False,
             )
+            check_consistent_length(X, y)
+        else:
+            X, y = validate_data(
+                estimator,
+                X=X,
+                y=y,
+                # Parameters to `check_X_y()`
+                accept_sparse=False,
+                dtype=None,  # This is handled later in `fit()`
+                ensure_all_finite="allow-nan",
+                ensure_min_samples=2,
+                ensure_min_features=1,
+                y_numeric=ensure_y_numeric,
+                estimator=estimator,
+            )
+
+        if is_classifier(estimator):
+            if not is_soft_labels:
+                check_classification_targets(y)
+                # Annoyingly, the `ensure_all_finite` above only applies to `X` and
+                # there is no way to specify this for `y`. The validation check above
+                # will also only check for NaNs in `y` if `multi_output=True` which is
+                # something we don't want. Hence, we run another check on `y` here.
+                # However, we also have to consider that if the dtype is a string type,
+                # then we still want to run finite checks without forcing a numeric dtype.
+                y = check_array(
+                    y,
+                    accept_sparse=False,
+                    ensure_all_finite=True,
+                    dtype=None,  # type: ignore
+                    ensure_2d=False,
+                )
     except (ValueError, TypeError) as e:
         raise TabPFNValidationError(str(e)) from e
 
